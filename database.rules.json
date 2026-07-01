@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "projects": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "collaborators": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "news": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "comments": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
