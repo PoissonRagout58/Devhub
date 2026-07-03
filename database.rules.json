@@ -6,7 +6,7 @@
     },
     "collaborators": {
       ".read": true,
-      ".write": "auth != null"
+      ".write": "auth != null && root.child('roles').child(auth.uid).val() === 'admin'"
     },
     "news": {
       ".read": true,
@@ -15,6 +15,18 @@
     "comments": {
       ".read": true,
       ".write": true
+    },
+    "roles": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('roles').child(auth.uid).val() === 'admin'"
+    },
+    "requests": {
+      ".read": "auth != null",
+      ".write": true
+    },
+    "invitations": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }
