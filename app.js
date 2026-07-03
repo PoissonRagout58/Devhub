@@ -45,7 +45,7 @@ document.documentElement.setAttribute("data-theme", state.theme);
 const uid = () => Math.random().toString(36).slice(2,9);
 const fd  = d  => { if(!d) return ""; return new Date(d).toLocaleDateString("fr-FR",{day:"numeric",month:"short",year:"numeric"}); };
 const now = () => new Date().toISOString().split("T")[0];
-const esc = s  => (s||"").toString().replace(/[&<>"']/g, c=>({`&`:"&amp;",`<`:"&lt;",`>`:"&gt;",`"`:"&quot;","'":"&#39;"}[c]));
+const esc = s  => (s||"").toString().replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const avatarHTML = (c, size=32) => `<div class="avatar" style="width:${size}px;height:${size}px;background:${c.color};font-size:${size*.38}px">${esc(c.initials||c.name[0])}</div>`;
 const isAdmin = () => state.loggedIn && state.role === "admin";
 const isDev   = () => state.loggedIn && (state.role === "developer" || state.role === "admin");
