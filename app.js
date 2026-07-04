@@ -8,6 +8,9 @@ import {
   watchUserRole, setUserRole, deleteUserRole, watchAllRoles,
   watchRequests, addRequest, updateRequest,
   watchAllInvitations, addInvitation, updateInvitation,
+  createAccount, resetPassword,
+  watchAllUsers, setUserData, getUserData,
+  watchLikes, setLike, removeLike,
 } from "./firebase-config.js";
 import { extractZipToPages } from "./zip-embed.js";
 
@@ -33,7 +36,7 @@ const state = {
   view:"home", selId:null,
   projects:[], collabs:[], news:[], comments:[], requests:[], allRoles:{},
   loggedIn:false, role:null, currentUid:null,  // null | 'developer' | 'admin'
-  invitations:[],
+  invitations:[], allUsers:{}, likes:{},
   filter:"all", search:"",
   seenFirstNews:false, showPopupQueued:false,
   theme: localStorage.getItem("dh-theme") || "synthwave",
@@ -65,6 +68,11 @@ watchAuth(user => {
   state.currentUid = user?.uid || null;
   if(unsubRole) { unsubRole(); unsubRole=null; }
   if(user) {
+    getUserData(user.uid, data => {
+      if(!data) setUserData(user.uid, { email: user.email, name: user.displayName || user.email.split('@')[0], role: 'member', createdAt: Date.now() });
+    });
+  }
+  if(user) {
     unsubRole = watchUserRole(user.uid, role => { state.role = role; render(); });
   } else {
     state.role = null; render();
@@ -80,6 +88,8 @@ watchNews(n => {
 watchComments(c => { state.comments=c; render(); });
 watchRequests(r => { state.requests=r; render(); });
 watchAllInvitations(inv => { state.invitations=inv; render(); });
+watchAllUsers(u => { state.allUsers=u; render(); });
+watchLikes(l => { state.likes=l; render(); });
 watchAllRoles(r => { state.allRoles=r; render(); });
 
 // ── RENDER ────────────────────────────────────────────────────
@@ -139,7 +149,8 @@ function renderNav() {
       </div>
       ${state.loggedIn ? `
         ${isAdmin() ? `<button class="bg" style="font-size:12px" data-go="admin">⚙ Admin</button>` : ""}
-        <span class="role-${state.role==="admin"?"admin":"dev"}" style="font-size:11px">${state.role==="admin"?"Admin":"Dev"}</span>
+        <span class="${state.role==="admin"?"role-admin":state.role==="developer"?"role-dev":"req-pending"}" style="font-size:11px">${state.role==="admin"?"Admin 👑":state.role==="developer"?"Dev 💻":"Membre 👤"}</span>
+        <button class="bg" id="btn-edit-profile" style="font-size:12px;padding:7px 12px" title="Mon profil">⚙️ Profil</button>
         <button class="bg" id="btn-logout" style="font-size:12px;color:#F87171;border-color:rgba(239,68,68,.25)">Déconnexion</button>
       ` : `<button class="bg" id="btn-login" style="font-size:12px">🔒 Connexion</button>`}
     </div>
@@ -160,7 +171,7 @@ function renderWhySection() {
           Que tu sois curieux, futur recruteur ou étudiant à la recherche d'inspiration, tu es ici chez toi.
         </p>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          ${!state.loggedIn ? `<button class="bp" id="btn-join" style="font-size:13px">✋ Rejoindre l'équipe</button>` : ""}
+          ${!state.loggedIn ? `<button class="bp" id="btn-join" style="font-size:13px">✋ Rejoindre l'équipe</button>` : (state.role==="member"?`<button class="bp" id="btn-join" style="font-size:13px">✋ Demander le rôle Développeur</button>`:"")}
           <a href="https://github.com/PoissonRagout58" target="_blank" rel="noopener noreferrer" class="bg" style="font-size:13px">GitHub →</a>
         </div>
       </div>
@@ -251,7 +262,10 @@ function projectCardHTML(p) {
     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px">${(p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--bd);padding-top:12px">
       <div style="display:flex">${team.map((c,i)=>`<div style="margin-left:${i?-7:0}px" title="${esc(c.name)}">${avatarHTML(c,26)}</div>`).join("")}</div>
-      ${p.updates?.[0]?`<div class="mono" style="font-size:11px;color:var(--tx3)">↑ ${fd(p.updates[0].date)}</div>`:""}
+      <div style="display:flex;align-items:center;gap:10px">
+        ${(()=>{ const likeCount=Object.keys(state.likes[p.id]||{}).length; const liked=state.currentUid&&state.likes[p.id]?.[state.currentUid]; return `<button data-like="${p.id}" style="background:none;border:none;cursor:${state.loggedIn?"pointer":"default"};font-size:13px;display:flex;align-items:center;gap:4px;color:var(--tx3);padding:0" title="${state.loggedIn?"J\'aimer":"Connecte-toi pour liker"}">${liked?"❤️":"🤍"}<span style="font-size:11px">${likeCount||""}</span></button>`; })()}
+        ${p.updates?.[0]?`<div class="mono" style="font-size:11px;color:var(--tx3)">↑ ${fd(p.updates[0].date)}</div>`:""}
+      </div>
     </div>
   </div>`;
 }
@@ -314,6 +328,7 @@ function renderProject() {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${project.hasServer&&project.serverUrl?`<a href="${esc(project.serverUrl)}" target="_blank" rel="noopener noreferrer" class="bp" style="font-size:13px">🌐 Voir en ligne</a>`:""}
         ${project.hasDownload&&project.downloadUrl?`<a href="${esc(project.downloadUrl)}" target="_blank" rel="noopener noreferrer" class="bg" style="font-size:13px">⬇ Code source</a>`:""}
+        ${(()=>{ const likeCount=Object.keys(state.likes[project.id]||{}).length; const liked=state.currentUid&&state.likes[project.id]?.[state.currentUid]; return `<button data-like="${project.id}" class="${liked?"bp":"bg"}" style="font-size:13px;display:flex;align-items:center;gap:6px" title="${state.loggedIn?"":"Connecte-toi pour liker"}">${liked?"❤️":"🤍"} ${likeCount?likeCount+" j'aime":"J'aime"}</button>`; })()}
       </div>
     </div>
     <div style="border-bottom:1px solid var(--bd);margin-bottom:28px;overflow-x:auto;display:flex">
@@ -355,8 +370,10 @@ function renderProjectTabContent(project, embedSrc, pc) {
   if(projectTab==="comments") {
     return `<div>
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:18px">
-        <input class="inp" id="comment-name" placeholder="Votre nom" style="margin-bottom:8px;max-width:220px">
-        <textarea class="ta" id="comment-text" placeholder="Partagez votre avis..." rows="3" style="margin-bottom:10px"></textarea>
+        ${(()=>{ const me=state.allUsers[state.currentUid]; const cc=currentCollab(); return me||cc?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:var(--sfh);border-radius:8px;padding:8px 12px">${cc?avatarHTML(cc,28):""}<span class="inter" style="font-size:13px;color:var(--tx)">Tu commentes en tant que <strong>${esc(me?.name||cc?.name||"")}</strong></span></div>`:state.loggedIn?"":""; })()}
+        ${state.loggedIn&&state.allUsers[state.currentUid]?"":`<input class="inp" id="comment-name" placeholder="Votre nom (ou pseudo)" style="margin-bottom:8px;max-width:220px">`}
+        <textarea class="ta" id="comment-text" placeholder="Partagez votre avis sur ce projet..." rows="3" style="margin-bottom:10px"></textarea>
+        ${!state.loggedIn?`<div class="inter" style="font-size:12px;color:var(--tx3);margin-bottom:8px">💡 <button id="login-to-comment" style="background:none;border:none;color:var(--l1);cursor:pointer;font-size:12px;font-family:var(--fb)">Connecte-toi</button> pour que ton nom apparaisse automatiquement.</div>`:""}
         <button class="bp" id="btn-comment" style="font-size:13px">Publier</button>
       </div>
       ${pc.length===0?`<div class="inter" style="color:var(--tx3);font-size:13px">Aucun avis. Soyez le premier !</div>`:""}
@@ -390,7 +407,7 @@ function renderAdmin() {
       </div>
     </div>
     <div style="display:flex;border-bottom:1px solid var(--bd);margin-bottom:26px;overflow-x:auto">
-      ${[["projects","🗂 Projets"],["collabs","👥 Membres"],["requests",`📩 Demandes${pending?` (${pending})`:""}` ],["roles","🛡 Rôles"]].map(([k,l])=>`<button class="ptab${adminTab===k?" on":""}" data-atab="${k}">${l}</button>`).join("")}
+      ${[["projects","🗂 Projets"],["collabs","👥 Membres"],["requests",`📩 Demandes${pending?` (${pending})`:""}`],["members","👤 Utilisateurs"]].map(([k,l])=>`<button class="ptab${adminTab===k?" on":""}" data-atab="${k}">${l}</button>`).join("")}
     </div>
     <div id="atab-content">${renderAdminTab()}</div>
   </div>`;
@@ -456,21 +473,39 @@ function renderAdminTab() {
         </div>`).join("")}
       </div></div>`;
   }
-  if(adminTab==="roles") {
-    const roleEntries = Object.entries(state.allRoles);
+  if(adminTab==="members") {
+    const users = Object.entries(state.allUsers).map(([uid,u])=>({uid,...u}));
+    users.sort((a,b)=>{ const order={admin:0,developer:1,member:2}; return (order[a.role]??3)-(order[b.role]??3); });
+    const ROLE_LABELS = { admin:"Administrateur 👑", developer:"Développeur 💻", member:"Membre 👤" };
+    const ROLE_CSS    = { admin:"role-admin", developer:"role-dev", member:"req-pending" };
     return `<div>
-      <p class="inter" style="font-size:13px;color:var(--tx2);margin-bottom:6px">Attribue un rôle Admin ou Développeur à un utilisateur Firebase Auth.</p>
-      <p class="inter" style="font-size:12px;color:var(--tx3);margin-bottom:18px">Tu trouveras l'UID dans Firebase Console → Authentication → Users.</p>
-      <button class="bp" id="btn-add-role" style="margin-bottom:18px;font-size:13px">+ Ajouter un rôle</button>
+      <p class="inter" style="font-size:13px;color:var(--tx2);margin-bottom:18px">
+        Gérez les rôles de tous les utilisateurs inscrits. Tu ne peux pas modifier ton propre rôle.
+      </p>
+      ${users.length===0?`<div class="inter" style="color:var(--tx3);font-size:13px">Aucun utilisateur inscrit pour l'instant.</div>`:""}
       <div style="display:flex;flex-direction:column;gap:8px">
-        ${roleEntries.map(([uid,role])=>`<div class="flat" style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-          <div>
-            <div class="mono" style="font-size:12px;color:var(--l1)">${esc(uid)}</div>
-            <span class="role-${role==="admin"?"admin":"dev"}" style="margin-top:4px;display:inline-block">${role==="admin"?"Administrateur":"Développeur"}</span>
-          </div>
-          <button class="bd" data-del-role="${uid}">Supprimer</button>
-        </div>`).join("") || `<div class="inter" style="color:var(--tx3);font-size:13px">Aucun rôle défini. Ajoute le tien en premier.</div>`}
-      </div></div>`;
+        ${users.map(u=>{
+          const isSelf = u.uid === state.currentUid;
+          const role = u.role || "member";
+          return `<div class="flat" style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                <span class="sg" style="font-size:14px;font-weight:600;color:var(--tx)">${esc(u.name||"Sans nom")}</span>
+                <span class="${ROLE_CSS[role]||"req-pending"}">${ROLE_LABELS[role]||role}</span>
+                ${isSelf?`<span class="mono" style="font-size:10px;color:var(--tx3)">(toi)</span>`:""}
+              </div>
+              <div class="inter" style="font-size:12px;color:var(--tx3)">${esc(u.email||"")}</div>
+            </div>
+            ${!isSelf?`<div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${role==="member"?`<button class="bp" data-promote="${u.uid}" data-to="developer" style="font-size:11px;padding:5px 12px">↑ Dev</button>`:""}
+              ${role==="developer"?`<button class="bp" data-promote="${u.uid}" data-to="admin" style="font-size:11px;padding:5px 12px">↑ Admin</button>
+                <button class="bd" data-promote="${u.uid}" data-to="member" style="font-size:11px">↓ Membre</button>`:""}
+              ${role==="admin"?`<button class="bd" data-promote="${u.uid}" data-to="developer" style="font-size:11px">↓ Dev</button>`:""}
+            </div>`:`<span class="inter" style="font-size:11px;color:var(--tx3)">—</span>`}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
   }
   return "";
 }
@@ -478,27 +513,64 @@ function renderAdminTab() {
 // ── MODALS ────────────────────────────────────────────────────
 const closeModal = () => { document.getElementById("modal-root").innerHTML=""; };
 
-function openLoginModal() {
+function openLoginModal(mode="login") {
   const mr = document.getElementById("modal-root");
-  mr.innerHTML=`<div class="overlay" id="overlay"><div class="modal pi" style="max-width:340px">
+  const isLogin = mode==="login";
+  const isReset = mode==="reset";
+  mr.innerHTML=`<div class="overlay" id="overlay"><div class="modal pi" style="max-width:380px">
     <div style="text-align:center;margin-bottom:22px">
-      <div style="font-size:30px;margin-bottom:8px">🔐</div>
-      <div class="sg" style="font-size:20px;font-weight:700;color:var(--tx)">Espace Modérateurs</div>
-      <div class="inter" style="font-size:13px;color:var(--tx3);margin-top:4px">Connexion via Firebase Auth</div>
+      <div style="font-size:30px;margin-bottom:8px">${isReset?"📧":isLogin?"🔑":"👋"}</div>
+      <div class="sg" style="font-size:20px;font-weight:700;color:var(--tx)">${isReset?"Réinitialiser le mot de passe":isLogin?"Se connecter":"Créer un compte"}</div>
+      <div class="inter" style="font-size:13px;color:var(--tx3);margin-top:4px">${isReset?"Tu recevras un email de réinitialisation":isLogin?"Accède à ton espace DevHub":"Rejoins DevHub en tant que membre"}</div>
     </div>
-    <input class="inp" id="login-email" placeholder="Email" style="margin-bottom:8px">
-    <input class="inp" id="login-pw" type="password" placeholder="Mot de passe" style="margin-bottom:8px">
-    <div id="login-err" class="inter" style="color:#F87171;font-size:12px;margin-bottom:8px"></div>
-    <button class="bp" id="login-submit" style="width:100%">Se connecter</button>
+    ${!isLogin&&!isReset?`<div style="margin-bottom:12px"><div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Ton prénom *</div><input class="inp" id="auth-name" placeholder="Prénom affiché sur ton profil"></div>`:""}
+    <div style="margin-bottom:8px"><div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Email *</div><input class="inp" id="auth-email" placeholder="ton@email.com" type="email"></div>
+    ${!isReset?`<div style="margin-bottom:12px"><div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Mot de passe *</div><input class="inp" id="auth-pw" type="password" placeholder="${isLogin?"Ton mot de passe":"Au moins 6 caractères"}"></div>`:""}
+    ${!isLogin&&!isReset?`<div style="background:var(--sfh);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div class="inter" style="font-size:12px;color:var(--tx2);line-height:1.5">✅ Compte <strong style="color:var(--tx)">Membre</strong> créé automatiquement.<br>Tu pourras ensuite faire une demande pour devenir <strong style="color:var(--l1)">Développeur</strong>.</div>
+    </div>`:""}
+    <div id="auth-err" class="inter" style="color:#F87171;font-size:12px;margin-bottom:8px"></div>
+    <div id="auth-ok" class="inter" style="color:#34D399;font-size:13px;margin-bottom:8px;display:none"></div>
+    <button class="bp" id="auth-submit" style="width:100%;margin-bottom:12px">${isReset?"Envoyer l'email":isLogin?"Se connecter":"Créer mon compte"}</button>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+      ${isLogin?`<button id="switch-register" style="background:none;border:none;color:var(--l1);cursor:pointer;font-size:13px;font-family:var(--fb)">Pas encore membre ? S'inscrire →</button>
+      <button id="switch-reset" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:12px;font-family:var(--fb)">Mot de passe oublié ?</button>`:""}
+      ${!isLogin?`<button id="switch-login" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:12px;font-family:var(--fb)">← Retour à la connexion</button>`:""}
+    </div>
   </div></div>`;
   document.getElementById("overlay").onclick = e=>{ if(e.target.id==="overlay") closeModal(); };
-  document.getElementById("login-submit").onclick = async()=>{
-    const email=document.getElementById("login-email").value;
-    const pw=document.getElementById("login-pw").value;
-    const btn=document.getElementById("login-submit");
-    btn.disabled=true; btn.textContent="Connexion...";
-    try{ await loginModerator(email,pw); closeModal(); }
-    catch{ document.getElementById("login-err").textContent="Email ou mot de passe incorrect."; btn.disabled=false; btn.textContent="Se connecter"; }
+  document.getElementById("switch-register")?.addEventListener("click",()=>openLoginModal("register"));
+  document.getElementById("switch-login")?.addEventListener("click",()=>openLoginModal("login"));
+  document.getElementById("switch-reset")?.addEventListener("click",()=>openLoginModal("reset"));
+  document.getElementById("auth-submit").onclick = async()=>{
+    const email = document.getElementById("auth-email").value.trim();
+    const pw    = document.getElementById("auth-pw")?.value;
+    const name  = document.getElementById("auth-name")?.value.trim();
+    const btn   = document.getElementById("auth-submit");
+    const err   = document.getElementById("auth-err");
+    const ok    = document.getElementById("auth-ok");
+    err.textContent=""; btn.disabled=true; btn.textContent="...";
+    if(!email){ err.textContent="Email requis."; btn.disabled=false; btn.textContent=isReset?"Envoyer l'email":isLogin?"Se connecter":"Créer mon compte"; return; }
+    if(isReset) {
+      try { await resetPassword(email); ok.style.display="block"; ok.textContent="✓ Email envoyé ! Vérifie ta boîte mail."; btn.style.display="none"; }
+      catch(e){ err.textContent=e.code==="auth/user-not-found"?"Aucun compte avec cet email.":"Erreur : "+e.message; btn.disabled=false; btn.textContent="Envoyer l'email"; }
+      return;
+    }
+    if(!pw || pw.length < 6){ err.textContent="Mot de passe requis (min. 6 caractères)."; btn.disabled=false; btn.textContent=isLogin?"Se connecter":"Créer mon compte"; return; }
+    if(isLogin) {
+      try { await loginModerator(email,pw); closeModal(); }
+      catch(e){ err.textContent=e.code==="auth/wrong-password"||e.code==="auth/user-not-found"||e.code==="auth/invalid-credential"?"Email ou mot de passe incorrect.":"Erreur : "+e.message; btn.disabled=false; btn.textContent="Se connecter"; }
+    } else {
+      if(!name){ err.textContent="Ton prénom est requis."; btn.disabled=false; btn.textContent="Créer mon compte"; return; }
+      try {
+        const cred = await createAccount(email,pw);
+        await setUserRole(cred.user.uid,"member");
+        await setUserData(cred.user.uid,{name,email,role:"member",createdAt:Date.now()});
+        ok.style.display="block"; ok.textContent=`✓ Compte créé ! Bienvenue ${name} 👋`;
+        btn.style.display="none";
+        setTimeout(()=>closeModal(),1500);
+      } catch(e){ err.textContent=e.code==="auth/email-already-in-use"?"Cet email est déjà utilisé.":e.code==="auth/weak-password"?"Mot de passe trop faible (min. 6 caractères).":"Erreur : "+e.message; btn.disabled=false; btn.textContent="Créer mon compte"; }
+    }
   };
 }
 
@@ -602,7 +674,7 @@ function openJoinModal() {
     <div style="text-align:center;margin-bottom:22px">
       <div style="font-size:30px;margin-bottom:8px">✋</div>
       <div class="sg" style="font-size:20px;font-weight:700;color:var(--tx)">Rejoindre l'équipe</div>
-      <div class="inter" style="font-size:13px;color:var(--tx3);margin-top:4px">Demande à devenir développeur sur DevHub</div>
+      <div class="inter" style="font-size:13px;color:var(--tx3);margin-top:4px">${state.loggedIn?"Tu es Membre — demande le rôle Développeur":"Crée un compte ou connecte-toi pour rejoindre"}</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:12px">
       <div><div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Ton prénom *</div><input class="inp" id="join-name" placeholder="Prénom"></div>
@@ -832,6 +904,7 @@ function attachHandlers() {
   root.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>{ state.view=el.dataset.go; render(); });
   document.getElementById("btn-login")?.addEventListener("click",openLoginModal);
   document.getElementById("btn-logout")?.addEventListener("click",()=>{ logoutModerator(); state.view="home"; render(); });
+  document.getElementById("btn-edit-profile")?.addEventListener("click", openEditProfileModal);
   document.getElementById("btn-theme")?.addEventListener("click",e=>{ e.stopPropagation(); state.showThemePicker=!state.showThemePicker; render(); });
   root.querySelectorAll("[data-theme-id]").forEach(el=>el.onclick=e=>{ e.stopPropagation(); applyTheme(el.dataset.themeId); });
   if(state.showThemePicker) document.addEventListener("click",()=>{ state.showThemePicker=false; render(); },{once:true});
@@ -847,7 +920,7 @@ function attachHandlers() {
   document.getElementById("btn-add-project-admin")?.addEventListener("click",()=>openProjectModal(null));
   document.getElementById("btn-add-collab")?.addEventListener("click",openAddCollabModal);
   document.getElementById("btn-join")?.addEventListener("click",openJoinModal);
-  document.getElementById("btn-add-role")?.addEventListener("click",openAddRoleModal);
+  // btn-add-role removed (replaced by members tab)
 
   root.querySelectorAll("[data-del-collab]").forEach(el=>el.onclick=async()=>{ if(confirm("Supprimer ce membre ?")) await deleteCollabDoc(el.dataset.delCollab); });
   root.querySelectorAll("[data-atab]").forEach(el=>el.onclick=()=>{ adminTab=el.dataset.atab; render(); });
@@ -863,14 +936,38 @@ function attachHandlers() {
     await updateProject(p.id,{updates});
   });
 
+  // Like handler
+  root.querySelectorAll("[data-like]").forEach(el=>el.onclick=async e=>{
+    e.stopPropagation();
+    if(!state.loggedIn){ openLoginModal("login"); return; }
+    const pid=el.dataset.like;
+    const alreadyLiked=state.likes[pid]?.[state.currentUid];
+    if(alreadyLiked) await removeLike(pid,state.currentUid);
+    else await setLike(pid,state.currentUid);
+  });
+  // Promote/demote users
+  root.querySelectorAll("[data-promote]").forEach(el=>el.onclick=async()=>{
+    const uid_p=el.dataset.promote; const to=el.dataset.to;
+    const user=state.allUsers[uid_p];
+    if(!confirm(`Changer le rôle de ${user?.name||"cet utilisateur"} en "${to==="admin"?"Administrateur":to==="developer"?"Développeur":"Membre"}" ?`)) return;
+    await setUserRole(uid_p, to);
+    await setUserData(uid_p, {role: to});
+  });
   document.getElementById("btn-invitations")?.addEventListener("click", openInvitationsModal);
   document.getElementById("btn-invite")?.addEventListener("click",()=>{ const p=state.projects.find(x=>x.id===state.selId); if(p) openInviteModal(p); });
   document.getElementById("btn-comment")?.addEventListener("click",async()=>{
-    const name=document.getElementById("comment-name").value.trim();
+    const me=state.allUsers[state.currentUid];
+    const cc=currentCollab();
+    const autoName = me?.name || cc?.name;
+    const nameEl=document.getElementById("comment-name");
+    const name = autoName || (nameEl?.value.trim());
     const text=document.getElementById("comment-text").value.trim();
-    if(!name||!text) return;
+    if(!name||!text){ alert("Nom et avis requis."); return; }
     await addComment({projectId:state.selId,author:name,content:text});
+    if(document.getElementById("comment-text")) document.getElementById("comment-text").value="";
+    if(nameEl) nameEl.value="";
   });
+  document.getElementById("login-to-comment")?.addEventListener("click",()=>openLoginModal("login"));
 
   root.querySelectorAll("[data-approve-req]").forEach(el=>el.onclick=async()=>{ await updateRequest(el.dataset.approveReq,{status:"approved"}); });
   root.querySelectorAll("[data-reject-req]").forEach(el=>el.onclick=async()=>{ if(confirm("Refuser cette demande ?")) await updateRequest(el.dataset.rejectReq,{status:"rejected"}); });
@@ -976,6 +1073,82 @@ function openInvitationsModal() {
   });
 }
 
+
+
+// ── MODIFIER SON PROFIL ───────────────────────────────────────
+function openEditProfileModal() {
+  const me = state.allUsers[state.currentUid] || {};
+  const cc = currentCollab();
+  const COLORS = ["#7C3AED","#06B6D4","#10B981","#F59E0B","#EF4444","#EC4899","#8B5CF6","#3B82F6","#F97316"];
+  let chosenColor = cc?.color || COLORS[0];
+  const mr = document.getElementById("modal-root");
+
+  const paint = () => {
+    mr.innerHTML=`<div class="overlay" id="overlay"><div class="modal pi" style="max-width:420px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <div class="sg" style="font-size:18px;font-weight:700;color:var(--tx)">⚙️ Mon profil</div>
+        <button id="ep-close" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:18px">✕</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;background:var(--sfh);border-radius:12px;padding:14px;margin-bottom:20px">
+        <div style="width:52px;height:52px;border-radius:50%;background:${chosenColor};display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff;flex-shrink:0">${esc((me.name||"?").slice(0,2).toUpperCase())}</div>
+        <div>
+          <div class="inter" style="font-size:13px;font-weight:600;color:var(--tx);margin-bottom:2px">${esc(me.name||"")}</div>
+          <div class="inter" style="font-size:11px;color:var(--tx3);margin-bottom:4px">${esc(me.email||"")}</div>
+          <span class="${me.role==="admin"?"role-admin":me.role==="developer"?"role-dev":"req-pending"}">${me.role==="admin"?"Admin 👑":me.role==="developer"?"Dev 💻":"Membre 👤"}</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Prénom affiché *</div>
+          <input class="inp" id="ep-name" placeholder="Ton prénom" value="${esc(me.name||"")}">
+        </div>
+        <div>
+          <div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Bio</div>
+          <textarea class="ta" id="ep-bio" rows="2" placeholder="Quelques mots sur toi...">${esc(cc?.bio||me.bio||"")}</textarea>
+        </div>
+        ${cc?`<div>
+          <div class="inter" style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Couleur d'avatar</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" id="ep-colors">
+            ${COLORS.map(c=>`<div data-color="${c}" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${chosenColor===c?"white":"transparent"};transition:border .15s"></div>`).join("")}
+          </div>
+        </div>`:""}
+      </div>
+      <div id="ep-err" class="inter" style="color:#F87171;font-size:12px;margin-top:8px"></div>
+      <div id="ep-ok" class="inter" style="color:#34D399;font-size:13px;margin-top:8px;display:none">✓ Profil mis à jour !</div>
+      <div style="display:flex;gap:8px;margin-top:18px">
+        <button class="bp" id="ep-submit" style="flex:1">Sauvegarder</button>
+        <button class="bg" id="ep-cancel">Annuler</button>
+      </div>
+    </div></div>`;
+    document.getElementById("overlay").onclick = e=>{ if(e.target.id==="overlay") closeModal(); };
+    document.getElementById("ep-close").onclick = closeModal;
+    document.getElementById("ep-cancel").onclick = closeModal;
+    document.querySelectorAll("#ep-colors div").forEach(el=>{
+      el.onclick=()=>{ chosenColor=el.dataset.color; paint(); };
+    });
+    document.getElementById("ep-submit").onclick = async()=>{
+      const name = document.getElementById("ep-name").value.trim();
+      const bio  = document.getElementById("ep-bio").value.trim();
+      if(!name){ document.getElementById("ep-err").textContent="Le prénom est requis."; return; }
+      const btn=document.getElementById("ep-submit"); btn.disabled=true; btn.textContent="Sauvegarde...";
+      try {
+        // Mettre à jour le profil utilisateur Firebase
+        await setUserData(state.currentUid, {name, bio});
+        // Si le user a un profil collaborateur lié, mettre à jour aussi
+        const collabId = state.collabs.find(c=>c.uid===state.currentUid)?.id;
+        if(collabId) await updateCollab(collabId, {name, bio, color:chosenColor, initials:name.slice(0,2).toUpperCase()});
+        document.getElementById("ep-ok").style.display="block";
+        document.getElementById("ep-err").textContent="";
+        btn.style.display="none";
+        setTimeout(closeModal, 1200);
+      } catch(e){
+        document.getElementById("ep-err").textContent="Erreur : "+e.message;
+        btn.disabled=false; btn.textContent="Sauvegarder";
+      }
+    };
+  };
+  paint();
+}
 
 // ── COOKIE BANNER & LEGAL ─────────────────────────────────────
 function renderCookieBanner() {

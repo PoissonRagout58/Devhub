@@ -2,7 +2,7 @@
   "rules": {
     "projects": {
       ".read": true,
-      ".write": "auth != null"
+      ".write": "auth != null && (root.child('roles').child(auth.uid).val() === 'admin' || root.child('roles').child(auth.uid).val() === 'developer')"
     },
     "collaborators": {
       ".read": true,
@@ -10,7 +10,7 @@
     },
     "news": {
       ".read": true,
-      ".write": "auth != null"
+      ".write": "auth != null && (root.child('roles').child(auth.uid).val() === 'admin' || root.child('roles').child(auth.uid).val() === 'developer')"
     },
     "comments": {
       ".read": true,
@@ -20,12 +20,22 @@
       ".read": "auth != null",
       ".write": "auth != null && root.child('roles').child(auth.uid).val() === 'admin'"
     },
+    "users": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && (auth.uid === $uid || root.child('roles').child(auth.uid).val() === 'admin')"
+      }
+    },
     "requests": {
       ".read": "auth != null",
       ".write": true
     },
     "invitations": {
       ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "likes": {
+      ".read": true,
       ".write": "auth != null"
     }
   }

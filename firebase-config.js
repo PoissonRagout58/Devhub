@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, push, set, update, remove, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const firebaseConfig = {
@@ -69,3 +69,21 @@ export const updateRequest = (id, data) => update(ref(db,`requests/${id}`), data
 export const watchAllInvitations = cb => listenList("invitations", cb, "createdAt", true);
 export const addInvitation = data => set(push(ref(db,"invitations")), {...data, createdAt:Date.now(), status:"pending"});
 export const updateInvitation = (id, data) => update(ref(db,`invitations/${id}`), data);
+
+// ── INSCRIPTION & MOT DE PASSE OUBLIÉ ───────────────────────
+export const createAccount = (email, password) => createUserWithEmailAndPassword(auth, email, password);
+export const resetPassword  = email => sendPasswordResetEmail(auth, email);
+
+// ── USERS (profils membres) ──────────────────────────────────
+// users/{uid} = { name, email, role, createdAt }
+export const watchAllUsers = cb => onValue(ref(db, "users"), snap => cb(snap.val() || {}));
+export const setUserData   = (uid, data) => update(ref(db, `users/${uid}`), data);
+export const getUserData   = (uid, cb) => onValue(ref(db, `users/${uid}`), snap => cb(snap.val()));
+
+// ── LIKES ────────────────────────────────────────────────────
+// likes/{projectId}/{uid} = true
+export const watchLikes  = cb => onValue(ref(db,"likes"), snap => cb(snap.val()||{}));
+export const setLike     = (pid,uid) => set(ref(db,`likes/${pid}/${uid}`), true);
+export const removeLike  = (pid,uid) => remove(ref(db,`likes/${pid}/${uid}`));
+
+export const updateCollab = (id, data) => update(ref(db, `collaborators/${id}`), data);
