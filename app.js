@@ -936,6 +936,8 @@ function attachHandlers() {
     await updateProject(p.id,{updates});
   });
 
+  // Manage collabs (admin)
+  root.querySelectorAll("[data-manage-collabs]").forEach(el=>el.onclick=e=>{ e.stopPropagation(); openManageCollabsModal(el.dataset.manageCollabs); });
   // Like handler
   root.querySelectorAll("[data-like]").forEach(el=>el.onclick=async e=>{
     e.stopPropagation();
@@ -1146,6 +1148,59 @@ function openEditProfileModal() {
         btn.disabled=false; btn.textContent="Sauvegarder";
       }
     };
+  };
+  paint();
+}
+
+
+// ── GÉRER LES COLLABORATEURS (admin) ─────────────────────────
+function openManageCollabsModal(projectId) {
+  const project = state.projects.find(p=>p.id===projectId);
+  if(!project) return;
+  const mr = document.getElementById("modal-root");
+
+  const paint = () => {
+    const current = project.collaborators || [];
+    mr.innerHTML=`<div class="overlay" id="overlay"><div class="modal pi" style="max-width:460px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div class="sg" style="font-size:18px;font-weight:700;color:var(--tx)">👥 Collaborateurs</div>
+        <button id="mc-close" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:18px">✕</button>
+      </div>
+      <div class="inter" style="font-size:12px;color:var(--tx3);margin-bottom:18px">Projet : <span style="color:var(--l1)">${esc(project.title)}</span></div>
+      ${state.collabs.length===0?`<div class="inter" style="color:var(--tx3);font-size:13px">Aucun membre dans l'équipe. Ajoute d'abord des membres via Admin → Membres.</div>`:`
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${state.collabs.map(c=>{
+          const isIn = current.includes(c.id);
+          return `<div style="display:flex;align-items:center;justify-content:space-between;background:var(--sf);border:1px solid ${isIn?"var(--bda)":"var(--bd)"};border-radius:10px;padding:10px 14px">
+            <div style="display:flex;align-items:center;gap:10px">
+              ${avatarHTML(c,36)}
+              <div>
+                <div class="inter" style="font-size:14px;font-weight:600;color:var(--tx)">${esc(c.name)}</div>
+                <div class="inter" style="font-size:11px;color:var(--tx3)">${esc(c.role)}</div>
+              </div>
+            </div>
+            <button data-toggle-collab="${c.id}" class="${isIn?"bd":"bp"}" style="font-size:12px;padding:6px 14px">
+              ${isIn?"Retirer":"Ajouter"}
+            </button>
+          </div>`;
+        }).join("")}
+      </div>`}
+      <button class="bg" id="mc-close-btn" style="width:100%;margin-top:18px">Fermer</button>
+    </div></div>`;
+
+    document.getElementById("overlay").onclick = e=>{ if(e.target.id==="overlay") closeModal(); };
+    document.getElementById("mc-close").onclick = closeModal;
+    document.getElementById("mc-close-btn").onclick = closeModal;
+
+    document.querySelectorAll("[data-toggle-collab]").forEach(el=>el.onclick=async()=>{
+      const cid = el.dataset.toggleCollab;
+      let collabs = [...(project.collaborators||[])];
+      if(collabs.includes(cid)) collabs = collabs.filter(x=>x!==cid);
+      else collabs.push(cid);
+      await updateProject(project.id, {collaborators: collabs});
+      // Re-paint with updated project (state will update via listener)
+      setTimeout(paint, 300);
+    });
   };
   paint();
 }
